@@ -1,209 +1,148 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+const mongoose = require('mongoose');
 
-var MongoClient = require('mongodb').MongoClient;
-var url = "mongodb://localhost:27017/Note_App";
+// MongoDB connection string
+const uri = "mongodb+srv://tranngoc27112004:27112004@cluster0.juzm8v5.mongodb.net/note_app?retryWrites=true&w=majority&appName=Cluster0";
 
-MongoClient.connect(url, function(err, db) {
-  if (err) throw err;
-  console.log("Database created!");
-  db.close();
+// Connect to MongoDB
+mongoose.connect(uri, {
+  serverApi: {
+    version: '1',
+    strict: true,
+    deprecationErrors: true
+  }
+})
+.then(() => {
+  console.log('Successfully connected to MongoDB.');
+})
+.catch((err) => {
+  console.error('MongoDB connection error:', err);
+  process.exit(1); // Exit if we can't connect to the database
 });
 
+// Create Express app
+const app = express();
+const port = 3000;
 
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
 
-// const express = require('express');
-// const bodyParser = require('body-parser');
-// const cors = require('cors');
-// const mongoose = require('mongoose');
-// const { MongoClient } = require('mongodb');
+// Define Note Schema
+const noteSchema = new mongoose.Schema({
+  title: {
+    type: String,
+    required: true,
+    trim: true
+  },
+  content: {
+    type: String,
+    required: true,
+    trim: true
+  }
+}, {
+  timestamps: true
+});
 
-// // Tạo ứng dụng Express
-// const app = express();
-// const port = 3000;
+// Create Note model
+const Note = mongoose.model('Note', noteSchema);
 
-// // Middleware 
-// app.use(cors()); // Cho phép CORS
-// app.use(bodyParser.json()); // Xử lý JSON
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
 
-// // Kết nối MongoDB
-// const username = "tranngoc27112004";
-// const password = "27112004";
-// const cluster = "cluster0.juzm8v5.mongodb.net";
-// const encoded_password = encodeURIComponent(password);
+// API Routes
+app.get('/api/notes', async (req, res) => {
+  try {
+    const notes = await Note.find().sort({ createdAt: -1 });
+    res.json({ success: true, data: notes });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
-// const uri = `mongodb+srv://${username}:${encoded_password}@${cluster}/?retryWrites=true&w=majority`;
+app.post('/api/notes', async (req, res) => {
+  try {
+    const note = new Note(req.body);
+    await note.save();
+    res.status(201).json({ success: true, data: note });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
-// // Kết nối MongoDB với Mongoose
-// mongoose.connect(uri, {
-//   useNewUrlParser: true,
-//   useUnifiedTopology: true,
-//   ssl: true
-// })
-// .then(() => {
-//   console.log('Kết nối MongoDB thành công!');
-// })
-// .catch((error) => {
-//   console.error('Lỗi kết nối MongoDB:', error);
-// });
+app.put('/api/notes/:id', async (req, res) => {
+  try {
+    const note = await Note.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    if (!note) {
+      return res.status(404).json({ success: false, message: 'Note not found' });
+    }
+    res.json({ success: true, data: note });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 
-// // Định nghĩa Schema cho Note
-// const noteSchema = new mongoose.Schema({
-//   title: {
-//     type: String,
-//     required: true,
-//     trim: true
-//   },
-//   description: {
-//     type: String,
-//     required: true,
-//     trim: true
-//   }
-// }, {
-//   timestamps: true // Tự động thêm createdAt và updatedAt
-// });
+app.delete('/api/notes/:id', async (req, res) => {
+  try {
+    const note = await Note.findByIdAndDelete(req.params.id);
+    if (!note) {
+      return res.status(404).json({ success: false, message: 'Note not found' });
+    }
+    res.json({ success: true, message: 'Note deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
-// // Tạo model Note
-// const Note = mongoose.model('Note', noteSchema);
+app.get('/api/notes/search', async (req, res) => {
+  try {
+    const query = req.query.q;
+    const notes = await Note.find({
+      $or: [
+        { title: { $regex: query, $options: 'i' } },
+        { content: { $regex: query, $options: 'i' } }
+      ]
+    }).sort({ createdAt: -1 });
+    res.json({ success: true, data: notes });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 
-// // Middleware để log các yêu cầu HTTP
-// app.use((req, res, next) => {
-//   console.log(`${req.method} ${req.url}`);
-//   next();
-// });
+// Start server
+const startServer = (port) => {
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`Server is running at http://localhost:${port}`);
+    console.log(`Accessible from other devices via your computer's IP address`);
+  }).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.log(`Port ${port} is in use, trying port ${port + 1}...`);
+      startServer(port + 1);
+    } else {
+      console.error('Server startup error:', err);
+    }
+  });
+};
 
-// // Định nghĩa các routes
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+  try {
+    await mongoose.connection.close();
+    console.log('MongoDB connection closed.');
+    process.exit(0);
+  } catch (err) {
+    console.error('Error during shutdown:', err);
+    process.exit(1);
+  }
+});
 
-// // 1. Lấy danh sách ghi chú
-// app.get('/notes', async (req, res) => {
-//   try {
-//     const notes = await Note.find().sort({ createdAt: -1 });
-//     res.json({
-//       success: true,
-//       data: notes
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: 'Lỗi khi lấy danh sách ghi chú',
-//       error: error.message
-//     });
-//   }
-// });
-
-// // 2. Thêm ghi chú mới
-// app.post('/notes', async (req, res) => {
-//   const { title, description } = req.body;
-//   try {
-//     const note = new Note({ title, description });
-//     const savedNote = await note.save();
-//     res.status(201).json({
-//       success: true,
-//       message: 'Ghi chú đã được thêm',
-//       data: savedNote
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: 'Lỗi khi thêm ghi chú',
-//       error: error.message
-//     });
-//   }
-// });
-
-// // 3. Sửa ghi chú
-// app.put('/notes/:id', async (req, res) => {
-//   const { id } = req.params;
-//   const { title, description } = req.body;
-//   try {
-//     const note = await Note.findByIdAndUpdate(
-//       id,
-//       { title, description },
-//       { new: true, runValidators: true }
-//     );
-    
-//     if (!note) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Không tìm thấy ghi chú'
-//       });
-//     }
-
-//     res.json({
-//       success: true,
-//       message: 'Ghi chú đã được cập nhật',
-//       data: note
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: 'Lỗi khi cập nhật ghi chú',
-//       error: error.message
-//     });
-//   }
-// });
-
-// // 4. Xóa ghi chú
-// app.delete('/notes/:id', async (req, res) => {
-//   const { id } = req.params;
-//   try {
-//     const note = await Note.findByIdAndDelete(id);
-    
-//     if (!note) {
-//       return res.status(404).json({
-//         success: false,
-//         message: 'Không tìm thấy ghi chú'
-//       });
-//     }
-
-//     res.json({
-//       success: true,
-//       message: 'Ghi chú đã được xóa'
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: 'Lỗi khi xóa ghi chú',
-//       error: error.message
-//     });
-//   }
-// });
-
-// // 5. Tìm kiếm ghi chú
-// app.get('/notes/search', async (req, res) => {
-//   const { q } = req.query;
-//   try {
-//     const notes = await Note.find({
-//       $or: [
-//         { title: { $regex: q, $options: 'i' } },
-//         { description: { $regex: q, $options: 'i' } }
-//       ]
-//     }).sort({ createdAt: -1 });
-
-//     res.json({
-//       success: true,
-//       data: notes
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       message: 'Lỗi khi tìm kiếm ghi chú',
-//       error: error.message
-//     });
-//   }
-// });
-
-// // Khởi động server
-// const startServer = (port) => {
-//   app.listen(port, '0.0.0.0', () => {
-//     console.log(`Server đang chạy tại http://localhost:${port}`);
-//     console.log(`Có thể truy cập từ các thiết bị khác qua IP của máy tính`);
-//   }).on('error', (err) => {
-//     if (err.code === 'EADDRINUSE') {
-//       console.log(`Port ${port} đang được sử dụng, thử port ${port + 1}...`);
-//       startServer(port + 1);
-//     } else {
-//       console.error('Lỗi khởi động server:', err);
-//     }
-//   });
-// };
-
-// startServer(port);
+startServer(port);

@@ -3,16 +3,13 @@ import 'package:http/http.dart' as http;
 import '../models/note.dart';
 
 class ApiService {
-  // Sử dụng IP của máy tính chạy server
-  static const String baseUrl = 'http://192.168.1.4:3000/api'; // Thay đổi IP này thành IP của máy tính của bạn
-  
-  // Các URL khác cho các môi trường khác nhau
-  // static const String baseUrl = 'http://10.0.2.2:3000/api'; // Cho Android Emulator
-  // static const String baseUrl = 'http://127.0.0.1:3000/api'; // Cho iOS Simulator
-
+  static const String _defaultBaseUrl = 'http://localhost:3000/api';
+  final String baseUrl;
   final http.Client _client = http.Client();
   static const int maxRetries = 3;
   static const Duration retryDelay = Duration(seconds: 1);
+
+  ApiService({String? baseUrl}) : baseUrl = baseUrl ?? _defaultBaseUrl;
 
   Future<T> _retry<T>(Future<T> Function() operation) async {
     int attempts = 0;
@@ -27,12 +24,22 @@ class ApiService {
     }
   }
 
+  String _getErrorMessage(dynamic error) {
+    if (error is http.Response) {
+      try {
+        final Map<String, dynamic> errorJson = json.decode(error.body);
+        return errorJson['message'] ?? 'An error occurred';
+      } catch (_) {
+        return 'Server error: ${error.statusCode}';
+      }
+    }
+    return error.toString();
+  }
+
   Future<List<Note>> getNotes() async {
     return _retry(() async {
       try {
         final response = await _client.get(Uri.parse('$baseUrl/notes'));
-        print('GET /notes - Status: ${response.statusCode}');
-        print('Response body: ${response.body}');
         
         if (response.statusCode == 200) {
           final Map<String, dynamic> jsonResponse = json.decode(response.body);
@@ -43,11 +50,10 @@ class ApiService {
             throw Exception(jsonResponse['message'] ?? 'Failed to load notes');
           }
         } else {
-          throw Exception('Failed to load notes: ${response.body}');
+          throw Exception(_getErrorMessage(response));
         }
       } catch (e) {
-        print('Error getting notes: $e');
-        throw Exception('Failed to load notes: $e');
+        throw Exception('Failed to load notes: ${_getErrorMessage(e)}');
       }
     });
   }
@@ -60,9 +66,6 @@ class ApiService {
           headers: {'Content-Type': 'application/json'},
           body: json.encode(note.toJson()),
         );
-        print('POST /notes - Status: ${response.statusCode}');
-        print('Request body: ${note.toJson()}');
-        print('Response body: ${response.body}');
         
         if (response.statusCode == 201) {
           final Map<String, dynamic> jsonResponse = json.decode(response.body);
@@ -72,16 +75,19 @@ class ApiService {
             throw Exception(jsonResponse['message'] ?? 'Failed to create note');
           }
         } else {
-          throw Exception('Failed to create note: ${response.body}');
+          throw Exception(_getErrorMessage(response));
         }
       } catch (e) {
-        print('Error creating note: $e');
-        throw Exception('Failed to create note: $e');
+        throw Exception('Failed to create note: ${_getErrorMessage(e)}');
       }
     });
   }
 
   Future<Note> updateNote(Note note) async {
+    if (note.id == null) {
+      throw Exception('Note ID is required for update');
+    }
+
     return _retry(() async {
       try {
         final response = await _client.put(
@@ -89,9 +95,6 @@ class ApiService {
           headers: {'Content-Type': 'application/json'},
           body: json.encode(note.toJson()),
         );
-        print('PUT /notes/${note.id} - Status: ${response.statusCode}');
-        print('Request body: ${note.toJson()}');
-        print('Response body: ${response.body}');
         
         if (response.statusCode == 200) {
           final Map<String, dynamic> jsonResponse = json.decode(response.body);
@@ -101,11 +104,10 @@ class ApiService {
             throw Exception(jsonResponse['message'] ?? 'Failed to update note');
           }
         } else {
-          throw Exception('Failed to update note: ${response.body}');
+          throw Exception(_getErrorMessage(response));
         }
       } catch (e) {
-        print('Error updating note: $e');
-        throw Exception('Failed to update note: $e');
+        throw Exception('Failed to update note: ${_getErrorMessage(e)}');
       }
     });
   }
@@ -114,8 +116,6 @@ class ApiService {
     return _retry(() async {
       try {
         final response = await _client.delete(Uri.parse('$baseUrl/notes/$id'));
-        print('DELETE /notes/$id - Status: ${response.statusCode}');
-        print('Response body: ${response.body}');
         
         if (response.statusCode == 200) {
           final Map<String, dynamic> jsonResponse = json.decode(response.body);
@@ -123,21 +123,25 @@ class ApiService {
             throw Exception(jsonResponse['message'] ?? 'Failed to delete note');
           }
         } else {
-          throw Exception('Failed to delete note: ${response.body}');
+          throw Exception(_getErrorMessage(response));
         }
       } catch (e) {
-        print('Error deleting note: $e');
-        throw Exception('Failed to delete note: $e');
+        throw Exception('Failed to delete note: ${_getErrorMessage(e)}');
       }
     });
   }
 
   Future<List<Note>> searchNotes(String query) async {
+    if (query.trim().isEmpty) {
+      return getNotes();
+    }
+
     return _retry(() async {
       try {
         final response = await _client.get(
-          Uri.parse('$baseUrl/notes/search?q=$query'),
+          Uri.parse('$baseUrl/notes/search?q=${Uri.encodeComponent(query)}'),
         );
+        
         if (response.statusCode == 200) {
           final Map<String, dynamic> jsonResponse = json.decode(response.body);
           if (jsonResponse['success'] == true) {
@@ -147,11 +151,10 @@ class ApiService {
             throw Exception(jsonResponse['message'] ?? 'Failed to search notes');
           }
         } else {
-          throw Exception('Failed to search notes: ${response.body}');
+          throw Exception(_getErrorMessage(response));
         }
       } catch (e) {
-        print('Error searching notes: $e');
-        throw Exception('Failed to search notes: $e');
+        throw Exception('Failed to search notes: ${_getErrorMessage(e)}');
       }
     });
   }
