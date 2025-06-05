@@ -1,6 +1,7 @@
 # note_app
 
 A new Flutter project.
+Use MongoDB Atlat. 
 
 ## Getting Started
 
